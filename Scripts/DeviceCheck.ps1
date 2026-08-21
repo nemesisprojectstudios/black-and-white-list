@@ -23,24 +23,20 @@ try {
     $watchlist = @("BOOTSTRAPPERNEW.EXE", "BOOTSTRAPPER.EXE", "XENO.EXE", "XENOUI.EXE", "SOLARA.EXE", "MAPPER.EXE", "LOADER.EXE", "MATCHA.EXE", "EVOLVE.EXE")
 
     $detectedCheats = @()
-    $allOutputs = @()
-
-    function Add-Output {
-        param([string]$Message, [string]$Type = "INFO")
-        $allOutputs += "$Message"
-    }
+    $warningCount = 0
 
     # --- 1. Exclusion Check ---
     try {
         $exclusions = Get-MpPreference | Select-Object -ExpandProperty ExclusionPath
         if ($exclusions) {
-            Add-Output "FAILURE: Exclusion paths detected:`n$($exclusions -join "`n")"
+            Write-Output "FAILURE: Exclusion paths detected:`n$($exclusions -join "`n")"
             $detectedCheats += "exclusion_paths"
         } else {
-            Add-Output "SUCCESS: No Exclusions were found at the moment."
+            Write-Output "SUCCESS: No Exclusions were found at the moment."
         }
     } catch {
-        Add-Output "WARNING: Could not get exclusion paths."
+        Write-Output "WARNING: Could not get exclusion paths."
+        $warningCount++
     }
 
     # --- 2. Threats Check ---
@@ -51,14 +47,15 @@ try {
         if ($activeThreats) {
             foreach ($t in $activeThreats) {
                 $msg = "FAILURE: Threat detected - Name: $($t.ThreatName), Severity: $($t.Severity), Path: $($t.Path), Detected: $($t.DetectionTime)"
-                Add-Output $msg
+                Write-Output $msg
                 $detectedCheats += "defender_threat_$($t.ThreatName)"
             }
         } else {
-            Add-Output "SUCCESS: No active threats that are not quarantined."
+            Write-Output "SUCCESS: No active threats that are not quarantined."
         }
     } catch {
-        Add-Output "WARNING: Threat scan could not complete."
+        Write-Output "WARNING: Threat scan could not complete."
+        $warningCount++
     }
 
     # --- 3. Memory Integrity & Blocklist ---
@@ -72,26 +69,28 @@ try {
             if ($vbStatus -eq 1) { $vbOn = $true }
         } catch {}
         if (-not ($memOn -eq 1 -or $vbOn)) {
-            Add-Output "FAILURE: Memory integrity and blocklist are both disabled."
+            Write-Output "FAILURE: Memory integrity and blocklist are both disabled."
             $detectedCheats += "memory_integrity_disabled"
         } else {
-            Add-Output "SUCCESS: Memory integrity is enabled or Vulnerable Blocklist is active."
+            Write-Output "SUCCESS: Memory integrity is enabled or Vulnerable Blocklist is active."
         }
     } catch {
-        Add-Output "WARNING: Unable to verify memory integrity."
+        Write-Output "WARNING: Unable to verify memory integrity."
+        $warningCount++
     }
 
     # --- 4. Windows Defender ---
     try {
         $defender = Get-MpComputerStatus
         if (-not ($defender.AMServiceEnabled -and $defender.RealTimeProtectionEnabled)) {
-            Add-Output "FAILURE: Windows Defender real-time protection is DISABLED."
+            Write-Output "FAILURE: Windows Defender real-time protection is DISABLED."
             $detectedCheats += "defender_realtime_disabled"
         } else {
-            Add-Output "SUCCESS: Windows Defender real-time protection is ENABLED."
+            Write-Output "SUCCESS: Windows Defender real-time protection is ENABLED."
         }
     } catch {
-        Add-Output "WARNING: Could not assess Defender status."
+        Write-Output "WARNING: Could not assess Defender status."
+        $warningCount++
     }
 
     # --- 5. Exploit Checker ---
@@ -99,13 +98,14 @@ try {
         $hash = "A89E3321B2BC0A90C21714F153E26DCF2BDEA4BC7200AF9C8CA8394FF54470A1"
         $found = Test-Path "$env:APPDATA\Isabelle"
         if ($hash -and $found) {
-            Add-Output "FAILURE: Isabelle exploit folder found and hash matched."
+            Write-Output "FAILURE: Isabelle exploit folder found and hash matched."
             $detectedCheats += "isabelle_exploit"
         } else {
-            Add-Output "SUCCESS: No exploit signs found."
+            Write-Output "SUCCESS: No exploit signs found."
         }
     } catch {
-        Add-Output "WARNING: Exploit check could not be completed."
+        Write-Output "WARNING: Exploit check could not be completed."
+        $warningCount++
     }
 
     # --- 6. Prefetch ---
@@ -117,27 +117,27 @@ try {
             $lastWrite = $pf.LastWriteTime
             $age = [math]::Round(($now - $lastWrite).TotalHours, 2)
             if ($watchlist -contains "$name.EXE") {
-                $msg = "WARNING: Suspicious prefetch file: $name | $age hours ago"
-                Add-Output $msg
+                Write-Output "WARNING: Suspicious prefetch file: $name | $age hours ago"
+                $warningCount++
                 $detectedCheats += "prefetch_suspicious_$name"
             } else {
-                Add-Output "Detected: $name | $age hrs ago"
+                Write-Output "Detected: $name | $age hrs ago"
             }
         }
     } catch {
-        Add-Output "WARNING: Could not access prefetch."
+        Write-Output "WARNING: Could not access prefetch."
+        $warningCount++
     }
 
     # --- 7. Key Checker ---
     try {
         $folders = Get-ChildItem "C:\ProgramData\KeyAuth\debug" -Directory -ErrorAction Stop
         foreach ($f in $folders) {
-            $msg = "FAILURE: External cheat/KeyAuth folder: $($f.Name)"
-            Add-Output $msg
+            Write-Output "FAILURE: External cheat/KeyAuth folder: $($f.Name)"
             $detectedCheats += "keyauth_folder_$($f.Name)"
         }
     } catch {
-        Add-Output "SUCCESS: No KeyAuth folders found."
+        Write-Output "SUCCESS: No KeyAuth folders found."
     }
 
     # --- 8. Registry Suspicious Check ---
@@ -149,15 +149,16 @@ try {
             foreach ($b in $blacklist) {
                 if ($lower -like "*$b*") {
                     if ($suspiciousList -contains $b) {
-                        $msg = "WARNING: Suspicious registry: $($prop.Name)"
-                        Add-Output $msg
+                        Write-Output "WARNING: Suspicious registry: $($prop.Name)"
+                        $warningCount++
                         $detectedCheats += "registry_suspicious_$b"
                     }
                 }
             }
         }
     } catch {
-        Add-Output "WARNING: Cannot access MuiCache registry."
+        Write-Output "WARNING: Cannot access MuiCache registry."
+        $warningCount++
     }
 
     # --- 9. PAH Check - SKIPPED (per request) ---
@@ -165,45 +166,35 @@ try {
     # Skipped per user request
 
     # --- 10. Summary Header ---
-    Add-Output ""
-    Add-Output "--- Summary ---"
+    Write-Output ""
+    Write-Output "--- Summary ---"
 
     # --- 11. Success Rate (no color) ---
-    $totalChecks = 8  # 8 main checks performed
+    $totalChecks = 8
     $failCount = ($detectedCheats | Measure-Object).Count
     $successCount = $totalChecks - $failCount
     $rate = [math]::Round(($successCount / $totalChecks) * 100, 2)
-    Add-Output "Success Rate: $rate% ($successCount / $totalChecks)"
+    Write-Output "Success Rate: $rate% ($successCount / $totalChecks)"
 
     # --- 12. Failures Count ---
-    Add-Output "Failures: $failCount"
+    Write-Output "Failures: $failCount"
 
     # --- 13. Warnings Count ---
-    $warningCount = ($allOutputs | Where-Object { $_ -like "WARNING:*" }).Count
-    Add-Output "Warnings: $warningCount"
-
-    # --- 14. Completion Time - SKIPPED (per request) ---
-    # Original item 14: Completed in X.XX seconds - SKIPPED per request
+    Write-Output "Warnings: $warningCount"
 
     # --- 15. Timestamp ---
-    Add-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 
-    # Output all collected outputs
-    $allOutputs | ForEach-Object { Write-Output $_ }
+    Write-Output ""
+    Write-Output "Final result:"
 
-    # Final result line
     $uniqueCheats = $detectedCheats | Select-Object -Unique
     if ($uniqueCheats.Count -gt 0) {
-        Write-Output ""
-        Write-Output "Final result:"
         Write-Output "FAIL: $($uniqueCheats -join ', ')"
         exit 1
-    } else {
-        Write-Output ""
-        Write-Output "Final result:"
-        Write-Output "PASS"
-        exit 0
     }
+    Write-Output "PASS"
+    exit 0
 
 } catch {
     Write-Output "ERROR: $($_.Exception.Message)"
