@@ -1,0 +1,6 @@
+sign-whitelist.py
+*.pem
+*.key
+key.hex
+key.b64
+.venv/
